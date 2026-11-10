@@ -1,0 +1,88 @@
+name: open-webui
+
+services:
+
+  ollama:
+    image: docker.io/ollama/ollama:latest
+    pull_policy: missing
+    container_name: ollama
+    environment:
+      OLLAMA_IGPU_ENABLE: "1"
+      OLLAMA_KEEP_ALIVE: 30m
+      OLLAMA_CONTEXT_LENGTH: "2048"
+    ports:
+      - "11434:11434"
+    devices:
+      - /dev/dri:/dev/dri
+    volumes:
+      - type: bind
+        source: ./data/ollama
+        target: /root/.ollama
+        bind:
+          create_host_path: true
+          selinux: Z
+    mem_reservation: 8g
+    mem_limit: 24g
+    networks:
+      - open_webui_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "OLLAMA_HOST=http://127.0.0.1:11434 ollama list >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  ollama-pull-qwen:
+    image: docker.io/ollama/ollama:latest
+    pull_policy: missing
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        export OLLAMA_HOST=http://ollama:11434
+        ollama pull qwen2.5:3b
+        ollama pull qwen2.5-coder:7b
+    networks:
+      - open_webui_net
+    restart: "no"
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    pull_policy: missing
+    container_name: open-webui
+    depends_on:
+      ollama:
+        condition: service_healthy
+      ollama-pull-qwen:
+        condition: service_completed_successfully
+    ports:
+      - "3000:8080"
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      WEBUI_URL: https://desktop-9j64par.cougar-scoville.ts.net
+      CORS_ALLOW_ORIGIN: https://desktop-9j64par.cougar-scoville.ts.net;http://desktop-9j64par:3000;http://127.0.0.1:3000;http://localhost:3000
+      DEFAULT_MODELS: qwen2.5:3b
+      DEFAULT_PINNED_MODELS: qwen2.5-coder:7b
+      DEFAULT_MODEL_PARAMS: '{"num_ctx":2048}'
+      WEBUI_ADMIN_EMAIL: ${WEBUI_ADMIN_EMAIL:?Set WEBUI_ADMIN_EMAIL in .env}
+      WEBUI_ADMIN_PASSWORD: ${WEBUI_ADMIN_PASSWORD:?Set WEBUI_ADMIN_PASSWORD in .env}
+    volumes:
+      - type: bind
+        source: ./data/open-webui
+        target: /app/backend/data
+        bind:
+          create_host_path: true
+          selinux: Z
+    mem_reservation: 512m
+    mem_limit: 2g
+    networks:
+      - open_webui_net
+    restart: unless-stopped
+
+networks:
+  open_webui_net:
+    driver: bridge

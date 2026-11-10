@@ -1,0 +1,5 @@
+# Secrets
+.env
+
+# Persistent container data (models, Open WebUI database)
+data/
